@@ -5,14 +5,16 @@ from flask_admin.helpers import get_form_data
 from flask_admin.actions import action
 from flask_admin.babel import ngettext, lazy_gettext
 from flask import flash
-from leancloud import Query, Object
+from wtforms import fields
+from leancloud import Query, Object, File
+from jinja2 import Markup
+from datetime import datetime, date
 
 
 class LeanDb(object):
     def __init__(self, coll):
         self.Class = Object.extend(coll)
 
-    @property
     def query(self):
         return Query(self.Class)
 
@@ -29,6 +31,11 @@ class ModelView(BaseModelView):
     """LeanCloud Model"""
 
     column_filters = None
+    details_modal = True
+    create_modal = True
+    edit_modal = True
+    form_image_width = 150
+    form_image_height = 150
 
     def __init__(self, coll,
                  name=None, category=None, endpoint=None, url=None,
@@ -37,7 +44,6 @@ class ModelView(BaseModelView):
                                         menu_class_name=menu_class_name,
                                         menu_icon_type=menu_icon_type,
                                         menu_icon_value=menu_icon_value)
-
         self.coll = coll
 
     def get_pk_value(self, model):
@@ -59,20 +65,34 @@ class ModelView(BaseModelView):
         raise NotImplementedError()
 
     def _get_field_value(self, model, name):
-        return model.get(name)
+        value = model.get(name)
+        if isinstance(value, File):
+            if value._type.startswith('image/'):
+                return Markup("<a href='%s'><img src='%s'/></a>" % (
+                    value.url, value.get_thumbnail_url(width=self.form_image_width, height=self.form_image_height)))
+            else:
+                return Markup("<a href='%s'>%s</a>" % (value.url, value.name))
+        return value
 
-    def get_list(self, page, sort_field, sort_desc, search, filters,
-                 page_size=None):
-        results = self.coll.query.find()
-        count = len(results)
+    def get_list(self, page, sort_field, sort_desc, search, filters, page_size=None):
+        query = self.coll.query()
+        count = query.count()
+
+        if page_size is None:
+            page_size = self.page_size
+        query.skip(page * page_size)
+        query.ascending('create_at')
+        query.limit(page_size)
+        results = query.find()
+
         return count, results
 
     def get_one(self, id):
-        return self.coll.query.get(id)
+        return self.coll.query().get(id)
 
-    def edit_form(self, obj=None):
+    def edit_form(self, obj):
         cols = {}
-        for col in self.column_list:
+        for col in set(self.column_list + self.column_details_list):
             cols[col] = obj.get(col)
         return self._edit_form_class(get_form_data(), **cols)
 
